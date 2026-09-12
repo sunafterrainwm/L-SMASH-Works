@@ -87,9 +87,13 @@ static lwlibav_handler_t* alloc_handler(void)
 static int update_indicator(progress_handler_t* php, const char* message, int percent)
 {
     static int last_percent = -1;
-    if (!strcmp(message, "Creating Index file") && last_percent != percent) {
+    const int is_creating = !strcmp(message, "Creating Index file");
+    const int is_parsing = !strcmp(message, "Parsing input file");
+
+    if ((is_creating || is_parsing) && last_percent != percent) {
         last_percent = percent;
-        fprintf(stderr, "Creating lwi index file %d%%\r", percent);
+        const char* display_msg = is_creating ? "Creating lwi index file" : "Parsing input file";
+        fprintf(stderr, "%s %d%%\r", display_msg, percent);
         fflush(stderr);
     }
     return 0;
@@ -390,7 +394,7 @@ void VS_CC vs_lwlibavsource_create(const VSMap* in, VSMap* out, void* user_data,
         vsapi->mapSetError(out, "lsmas: the GPU driver doesn't support this hardware decoding.");
         return;
     }
-    VSFilterDependency deps[] = { {NULL, rpGeneral} };
+    VSFilterDependency deps[] = { { NULL, rpGeneral } };
     VSNode* node = vsapi->createVideoFilter2("LWLibavSource", &hp->vi, vs_filter_get_frame, vs_filter_free, fmUnordered, deps, 0, hp, core);
     if (node) {
         vsapi->setLinearFilter(node);

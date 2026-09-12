@@ -39,9 +39,13 @@ extern "C" {
 static int update_indicator(progress_handler_t* php, const char* message, int percent)
 {
     static int last_percent = -1;
-    if (!strcmp(message, "Creating Index file") && last_percent != percent) {
+    const bool is_creating = !strcmp(message, "Creating Index file");
+    const bool is_parsing = !strcmp(message, "Parsing input file");
+
+    if ((is_creating || is_parsing) && last_percent != percent) {
         last_percent = percent;
-        fprintf(stderr, "Creating lwi index file %d%%\r", percent);
+        const char* display_msg = is_creating ? "Creating lwi index file" : "Parsing input file";
+        fprintf(stderr, "%s %d%%\r", display_msg, percent);
         fflush(stderr);
     }
     return 0;
@@ -311,10 +315,9 @@ LWLibavAudioSource::LWLibavAudioSource(lwlibav_option_t* opt, const char* channe
         uint64_t sequence_pcm_count = 0;
         uint64_t prior_sequences_resampled_count = 0;
         for (uint32_t i = 1; i <= adhp->frame_count; ++i) {
-            if ((current_sample_rate != info[i].sample_rate && info[i].sample_rate > 0)
-                || current_frame_length != info[i].length) {
-                prior_sequences_resampled_count +=
-                    count_sequence_output_pcm_samples(sequence_pcm_count, current_sample_rate, aohp->output_sample_rate);
+            if ((current_sample_rate != info[i].sample_rate && info[i].sample_rate > 0) || current_frame_length != info[i].length) {
+                prior_sequences_resampled_count
+                    += count_sequence_output_pcm_samples(sequence_pcm_count, current_sample_rate, aohp->output_sample_rate);
                 sequence_pcm_count = 0;
                 current_sample_rate = info[i].sample_rate > 0 ? info[i].sample_rate : adhp->ctx->sample_rate;
                 current_frame_length = info[i].length;

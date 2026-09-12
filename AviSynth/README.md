@@ -265,7 +265,8 @@
 * `LWLibavVideoSource(string source, int stream_index = -1, int threads = 0, bool cache = true, string cachefile = source + ".lwi",
                     int seek_mode = 0, int seek_threshold = 10, bool dr = false, int fpsnum = 0, int fpsden = 1,
                     bool repeat = unspecified, int dominance = 0, string format = "", string decoder = "", int prefer_hw = 0,
-                    int ff_loglevel = 0, string cachedir = "", string ff_options = "", bool rap_verification = true)`
+                    int ff_loglevel = 0, string cachedir = "", bool indexingpr = false, string ff_options = "",
+                    bool rap_verification = true)`
 
         * This function uses libavcodec as video decoder and libavformat as demuxer.
         [Arguments]
@@ -332,7 +333,7 @@
 
 * `LWLibavAudioSource(string source, int stream_index = -1, bool cache = true, string cachefile = source + ".lwi", bool av_sync = false,
                     string layout = "", int rate = 0, string decoder = "", int ff_loglevel = 0, string cachedir = "",
-                    float drc_scale = 1.0, string ff_options = "")`
+                    bool indexingpr = false, float drc_scale = 1.0, string ff_options = "")`
 
 
         * This function uses libavcodec as audio decoder and libavformat as demuxer.
