@@ -48,11 +48,17 @@ int vs_setup_audio_rendering(lw_audio_output_handler_t* aohp, AVCodecContext* ct
     if (aohp->output_sample_rate <= 0)
         aohp->output_sample_rate = ctx->sample_rate;
 
+    /* Decide output Bits Per Sample.
+     * Unlike AviSynth, which wants 24bit samples packed into 3 bytes, VapourSynth keeps them
+     * left aligned in a 32bit container, so the decoded S32 samples are handed over as they
+     * are and only the reported bit depth follows the source. */
     aohp->output_sample_format = decide_audio_output_sample_format(aohp->output_sample_format);
     aohp->s24_output = 0;
-    aohp->output_bits_per_sample = av_get_bytes_per_sample(aohp->output_sample_format) * 8;
-    if (aohp->output_bits_per_sample <= 0)
+    int container_bits_per_sample = av_get_bytes_per_sample(aohp->output_sample_format) * 8;
+    if (container_bits_per_sample <= 0)
         return -1;
+    if (aohp->output_sample_format != AV_SAMPLE_FMT_S32 || aohp->output_bits_per_sample != 24)
+        aohp->output_bits_per_sample = container_bits_per_sample;
 
     int input_channels = ctx->ch_layout.nb_channels;
     if (av_sample_fmt_is_planar(ctx->sample_fmt)) {
@@ -105,7 +111,9 @@ VSFrame* vs_interleaved_audio_frame(
     VSAudioFormat format;
     int sample_type = aohp->output_sample_format == AV_SAMPLE_FMT_FLT ? stFloat : stInteger;
     if (!vsapi->queryAudioFormat(
-            &format, sample_type, bytes_per_sample * 8, aohp->output_channel_layout.u.mask, core))
+            &format, sample_type, aohp->output_bits_per_sample, aohp->output_channel_layout.u.mask, core))
+        return NULL;
+    if (format.bytesPerSample != bytes_per_sample)
         return NULL;
     VSFrame* frame = vsapi->newAudioFrame(&format, sample_count, NULL, core);
     if (!frame)

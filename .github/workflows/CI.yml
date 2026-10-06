@@ -45,7 +45,7 @@ jobs:
     - name: Build AviSynth/VapourSynth plugin
       run: |
         pushd FFmpeg
-        ./configure --enable-gpl --enable-version3 --disable-static --enable-shared --disable-all --disable-autodetect --enable-avcodec --enable-avformat --enable-swresample --enable-swscale --disable-asm --disable-debug
+        ./configure --enable-gpl --enable-version3 --disable-static --enable-shared --disable-all --disable-autodetect --enable-avcodec --enable-avformat --enable-swresample --enable-swscale --disable-asm --disable-debug --enable-protocol=file --enable-demuxer=wav --enable-decoder=pcm_s8,pcm_u8,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le
         make -j2
         sudo make install -j2
         popd
@@ -55,5 +55,119 @@ jobs:
         fi
         cmake -B build_avs -DBUILD_VS_PLUGIN=OFF "${cmake_settings[@]}"
         cmake --build build_avs -j 2
+        cmake --install build_avs --prefix "$PWD/dist"
         cmake -B build_vs -DBUILD_AVS_PLUGIN=OFF "${cmake_settings[@]}"
         cmake --build build_vs -j 2
+        cmake --install build_vs --prefix "$PWD/dist"
+        find dist -type f
+
+    - name: Test VapourSynth audio bit depth
+      run: |
+        plugin=$(find dist -path '*/vapoursynth/*' -type f | head -n 1)
+        if [[ -z "$plugin" ]]; then
+            echo "no VapourSynth plugin was built" >&2
+            find dist -type f
+            exit 1
+        fi
+        export LSMAS_PLUGIN="$PWD/$plugin"
+        export LD_LIBRARY_PATH="$PWD/dist/lib:/usr/local/lib:${LD_LIBRARY_PATH}"
+        export DYLD_LIBRARY_PATH="$PWD/dist/lib:/usr/local/lib:${DYLD_LIBRARY_PATH}"
+        # VapourSynth installs its python module into site-packages, which is not
+        # on the default sys.path of the system python.
+        module=$(find /usr/lib /usr/local/lib /opt/homebrew/lib -maxdepth 3 -name 'vapoursynth.so' 2>/dev/null | head -n 1)
+        if [[ -n "$module" ]]; then
+            export PYTHONPATH="$(dirname "$module"):${PYTHONPATH}"
+        fi
+        python3 .github/tests/test_audio_bit_depth.py
+
+    - name: Upload plugin binaries
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: lsmashsource-${{ matrix.os }}
+        path: dist
+        if-no-files-found: error
+
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+        submodules: true
+
+    - uses: msys2/setup-msys2@v2
+      with:
+        msystem: UCRT64
+        update: true
+        install: >-
+          mingw-w64-ucrt-x86_64-cmake
+          mingw-w64-ucrt-x86_64-gcc
+          mingw-w64-ucrt-x86_64-ninja
+          mingw-w64-ucrt-x86_64-pkgconf
+          mingw-w64-ucrt-x86_64-zlib
+          git
+          make
+          unzip
+          diffutils
+
+    - name: Build VapourSynth plugin
+      run: |
+        # obuparse's obudump redefines off_t/fseeko/ftello in a way UCRT64 rejects.
+        sed -i 's|#define off_t __int64|// #define off_t __int64|g' obuparse/tools/obudump.c
+        sed -i 's|#define fseeko _fseeki64|// #define fseeko _fseeki64|g' obuparse/tools/obudump.c
+        sed -i 's|#define ftello _fseeki64|// #define ftello _fseeki64|g' obuparse/tools/obudump.c
+        pushd FFmpeg
+        ./configure --prefix=/ucrt64 --enable-gpl --enable-version3 --enable-static --disable-shared --disable-all \
+            --disable-autodetect --enable-avcodec --enable-avformat --enable-swresample --enable-swscale \
+            --enable-zlib --enable-w32threads --disable-programs --disable-doc --disable-asm --disable-debug             --enable-protocol=file --enable-demuxer=wav --enable-decoder=pcm_s8,pcm_u8,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le \
+            --pkg-config-flags=-static
+        make -j 2
+        make install -j 2
+        popd
+        export LDFLAGS="-static-libgcc -static-libstdc++ -static"
+        cmake -B build_vs -S . -G Ninja -DBUILD_AVS_PLUGIN=OFF -DENABLE_DAV1D=OFF -DENABLE_MFX=OFF \
+            -DENABLE_XML2=OFF -DENABLE_VPX=OFF -DENABLE_VULKAN=OFF -DZLIB_USE_STATIC_LIBS=ON -DBUILD_SHARED_LIBS=OFF
+        cmake --build build_vs -j 2
+        mkdir -p dist
+        dll=$(find build_vs -maxdepth 1 -iname '*lsmashsource*.dll' | head -n 1)
+        if [[ -z "$dll" ]]; then
+            echo "no VapourSynth plugin was built" >&2
+            ls -l build_vs
+            exit 1
+        fi
+        cp "$dll" dist/LSMASHSource.dll
+        ls -l dist
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Test VapourSynth audio bit depth
+      shell: pwsh
+      run: |
+        $tag = (Invoke-RestMethod https://api.github.com/repos/vapoursynth/vapoursynth/releases/latest).tag_name
+        Write-Host "VapourSynth portable: $tag"
+        Invoke-WebRequest -Uri "https://github.com/vapoursynth/vapoursynth/releases/download/$tag/VapourSynth64-Portable-$tag.zip" -OutFile vs-portable.zip
+        Expand-Archive -Path vs-portable.zip -DestinationPath vs-portable
+        $wheel = (Get-ChildItem -Path vs-portable -Recurse -Filter '*.whl' | Select-Object -First 1).FullName
+        if (-not $wheel) {
+            Get-ChildItem -Path vs-portable -Recurse | Select-Object -ExpandProperty FullName
+            throw "the portable package does not contain a wheel"
+        }
+        python -m pip install --disable-pip-version-check "$wheel"
+        $env:LSMAS_PLUGIN = (Resolve-Path dist/LSMASHSource.dll).Path
+        python .github/tests/test_audio_bit_depth.py
+
+    - name: Upload plugin binaries
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: lsmashsource-windows
+        path: dist
+        if-no-files-found: error
